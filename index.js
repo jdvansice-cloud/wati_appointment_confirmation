@@ -13,18 +13,17 @@ const config = {
     accessToken: process.env.WATI_ACCESS_TOKEN
   },
   mindbody: {
-    webhookSecret: process.env.MINDBODY_WEBHOOK_SECRET // Optional: for verifying webhook authenticity
+    webhookSecret: process.env.MINDBODY_WEBHOOK_SECRET
   },
   locations: {
     // Map Mindbody Location IDs to display names and addresses
-    // Update these with your actual Mindbody location IDs
-    'costa-del-este': {
+    1: {
       name: 'Costa del Este',
-      address: 'Plaza Costa del Este, Local 45' // Update with real address
+      address: 'Star Plaza, Frente al Riba Smith, Costa del Este'
     },
-    'san-francisco': {
-      name: 'San Francisco', 
-      address: 'Calle 74, San Francisco' // Update with real address
+    2: {
+      name: 'San Francisco',
+      address: 'C. 74 Este, San Francisco, al lado de la Delta de Calle 50'
     }
   },
   templateName: process.env.WATI_TEMPLATE_NAME || 'appointment_confirmation',
@@ -68,7 +67,7 @@ function formatPhoneNumber(phone) {
   if (!phone) return null;
   
   // Remove all non-numeric characters
-  let cleaned = phone.replace(/\D/g, '');
+  let cleaned = phone.toString().replace(/\D/g, '');
   
   // Panama numbers: if starts with 6 and is 8 digits, add 507
   if (cleaned.length === 8 && cleaned.startsWith('6')) {
@@ -118,14 +117,10 @@ function formatTime(dateString) {
  * Get location info from Mindbody location ID
  */
 function getLocationInfo(locationId) {
-  // Try to match location ID - you'll need to update this mapping
-  const locationMap = {
-    // Add your actual Mindbody location IDs here
-    // Example: '12345': 'costa-del-este'
+  return config.locations[locationId] || config.locations[1] || {
+    name: 'Mimosa Spa',
+    address: 'Panamá'
   };
-  
-  const locationKey = locationMap[locationId] || Object.keys(config.locations)[0];
-  return config.locations[locationKey] || config.locations['costa-del-este'];
 }
 
 // ===========================================
@@ -150,7 +145,9 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
 });
 
-// HEAD request handler - Mindbody uses this to verify the webhook URL
+/**
+ * HEAD request handler - Mindbody uses this to verify the webhook URL
+ */
 app.head('/webhook/mindbody/appointment', (req, res) => {
   res.status(200).end();
 });
@@ -165,33 +162,29 @@ app.post('/webhook/mindbody/appointment', async (req, res) => {
     const payload = req.body;
     
     // Mindbody webhook payload structure
-    // Adjust based on actual webhook format from Mindbody
-    const eventType = payload.eventType || payload.EventType || payload.messageType;
+    const eventId = payload.eventId || payload.EventId;
     const eventData = payload.eventData || payload.EventData || payload;
     
-    // Only process appointment booking events
-    if (eventType && !eventType.toLowerCase().includes('appointment')) {
-      console.log('⏭️ Skipping non-appointment event:', eventType);
-      return res.json({ received: true, processed: false, reason: 'Not an appointment event' });
+    // Only process appointment created events (skip cancelled, updated if you want)
+    if (eventId === 'appointmentBooking.cancelled') {
+      console.log('⏭️ Skipping cancelled appointment event');
+      return res.json({ received: true, processed: false, reason: 'Appointment cancelled' });
     }
     
-    // Extract appointment details
-    // Adjust these field names based on actual Mindbody webhook structure
-    const appointment = eventData.appointment || eventData.Appointment || eventData;
-    const client = appointment.client || appointment.Client || eventData.client || eventData.Client || {};
-    
-    const clientName = client.FirstName || client.firstName || client.name || 'Cliente';
-    const clientPhone = client.MobilePhone || client.mobilePhone || client.Phone || client.phone || client.HomePhone;
-    const serviceName = appointment.ServiceName || appointment.serviceName || 
-                        appointment.SessionType?.Name || appointment.sessionType?.name || 'Servicio';
-    const startDateTime = appointment.StartDateTime || appointment.startDateTime || 
-                          appointment.StartTime || appointment.startTime;
-    const locationId = appointment.LocationId || appointment.locationId || 
-                       appointment.Location?.Id || appointment.location?.id;
+    // Extract appointment details - Mindbody puts fields directly in eventData
+    const clientName = eventData.clientFirstName || eventData.ClientFirstName || 'Cliente';
+    const clientLastName = eventData.clientLastName || eventData.ClientLastName || '';
+    const clientPhone = eventData.clientPhone || eventData.ClientPhone || 
+                        eventData.clientMobilePhone || eventData.ClientMobilePhone;
+    const serviceName = eventData.appointmentName || eventData.AppointmentName || 
+                        eventData.serviceName || eventData.ServiceName || 'Servicio';
+    const startDateTime = eventData.startDateTime || eventData.StartDateTime;
+    const locationId = eventData.locationId || eventData.LocationId;
     
     // Validate required fields
     if (!clientPhone) {
       console.log('⚠️ No phone number found for client');
+      console.log('Available eventData fields:', Object.keys(eventData));
       return res.json({ received: true, processed: false, reason: 'No phone number' });
     }
     
