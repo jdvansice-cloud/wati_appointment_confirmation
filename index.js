@@ -150,6 +150,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'healthy' });
 });
 
+// HEAD request handler - Mindbody uses this to verify the webhook URL
+app.head('/webhook/mindbody/appointment', (req, res) => {
+  res.status(200).end();
+});
+
 /**
  * Main webhook endpoint for Mindbody appointment events
  */
